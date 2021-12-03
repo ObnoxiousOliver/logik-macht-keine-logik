@@ -25,7 +25,7 @@ export default {
     WorkArea
   },
   data: () => ({
-    started: false
+    started: true
   })
 }
 </script>

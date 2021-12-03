@@ -1,9 +1,14 @@
 <template>
-  <div class="node-graph" @wheel.prevent="backgroundMousewheel">
+  <div :class="['node-graph', readonly ? 'node-graph--readonly' : '']" @wheel.prevent="backgroundMousewheel">
     <div
       class="node-graph__background"
       @mousedown.left.prevent="backgroundMousedown"
-    />
+    >
+      <span v-if="inspectingNode" class="node-graph__inspecting-node">
+        <small>Inspecting:</small><br>
+        {{ inspectingNode }}<span class="node-graph__inspecting-node__readonly" v-if="readonly">(readonly)</span>
+      </span>
+    </div>
     <div
       :class="['node-graph__canvas', canvasMoving ? 'node-graph__canvas--moving' : '']"
       :style="{
@@ -11,10 +16,14 @@
       }"
     >
       <ConnectionRenderer
-        v-for="(connection, i) in connections"
-        :key="i"
+        v-for="connection in connections"
+        :key="(connection.b.id + connection.b.i)
+          || ('_' + connection.a.id + connection.a.i)
+          || ('_' + connection.a.x + connection.a.y)
+          || ('_' + connection.b.x + connection.b.y)"
         :a="connection.a"
         :b="connection.b"
+        :active="(outputValues[connection.a.id] || [])[connection.a.i]"
         :nodes="nodes"
         :nodeRendererEls="nodeRendererEls"
         :canvas="canvas"
@@ -26,26 +35,30 @@
           :key="node.id"
           :id="node.id"
           :type="node.type"
-          :name="node.node.name"
-          :inputs="node.node.inputs"
-          :outputs="node.node.outputs"
+          :node="node.node"
           :inputValues="nodeEls.find(x => x.id === node.id).inputValues"
           :outputValues="nodeEls.find(x => x.id === node.id).outputValuesDelay"
           :selectedPoints="selectedPoints"
-          @inputPointClick="inputPointClick"
-          @outputPointClick="outputPointClick"
-          @addInput="node.node.outputs.push(''); clearPointSelection()"
-          @addOutput="node.node.inputs.push(''); clearPointSelection()"
-          @toggleInput="toggleInput"
-          @outputTextChanged="outputTextChanged"
-          @inputTextChanged="inputTextChanged"
+          :inputs_="node.type === 'outputs' ? outputs : null"
+          :outputs_="node.type === 'inputs' ? inputs : null"
+          :readonly="readonly"
+          @inputPointClick="(id, i, e) => { if (!readonly) inputPointClick(id, i, e) }"
+          @outputPointClick="(id, i, e) => { if (!readonly) outputPointClick(id, i, e) }"
+          @inputPointMouseup="(id, i, e) => { if (!readonly) inputPointMouseup(id, i, e) }"
+          @outputPointMouseup="(id, i, e) => { if (!readonly) outputPointMouseup(id, i, e) }"
+          @addInput="() => { if (!readonly) inputs.push(''); clearPointSelection() }"
+          @addOutput="() => { if (!readonly) outputs.push(''); clearPointSelection() }"
+          @toggleInput="(id, i) => { if (!readonly) toggleInput(id, i) }"
+          @outputTextChanged="(id, text, e) => { if (!readonly) outputTextChanged(id, text, e) }"
+          @inputTextChanged="(id, text, e) => { if (!readonly) inputTextChanged(id, text, e) }"
+          @dblclick="$emit('inspectNode', node.id)"
 
           :style="{
             top: ((node.position || {}).y || 0) + 'px',
             left: ((node.position || {}).x || 0) + 'px'
           }"
-          @mousedown.left="(e) => nodeTouchstartMousedown(e, node)"
-          @touchstart="(e) => nodeTouchstartMousedown(e, node)"
+          @mousedown.left="(e) => { if (!readonly) nodeTouchstartMousedown(e, node) }"
+          @touchstart="(e) => { if (!readonly) nodeTouchstartMousedown(e, node) }"
 
           :class="selectedNode === node.id ? 'node--selected' : ''"
         />
@@ -57,12 +70,15 @@
         :nodes="nodeEls"
         :id="node.id"
         :type="node.type"
-        :name="node.node.name"
-        :inputs="node.node.inputs"
-        :outputs="node.node.outputs"
-        :function="node.node.function"
+        :node="node.node"
+        :delay="0"
         :outgoingPoints="node.outgoingPoints"
+        @outputChanged="(x) => outputValues[node.id] = x"
       />
+      <!-- :name="node.node.name"
+      :inputs="node.node.inputs"
+      :outputs="node.node.outputs"
+      :function="node.node.function" -->
     </div>
   </div>
 </template>
@@ -71,39 +87,80 @@
 import Node from './Node.vue'
 import NodeRenderer from './NodeRenderer.vue'
 import ConnectionRenderer from './ConnectionRenderer.vue'
+import { mapState } from 'vuex'
 
 export default {
+  emits: [
+    'inspectNode'
+  ],
+  props: {
+    inspectingNode: String
+  },
   components: {
     Node,
     NodeRenderer,
     ConnectionRenderer
   },
   computed: {
+    ...mapState([
+      'nodeLibary'
+    ]),
     connections () {
       var connections = []
 
-      this.nodes.forEach(x => {
+      this.nodes.forEach((x, i) => {
         if (x.outgoingPoints) {
           x.outgoingPoints.forEach(p => {
             connections.push({
               a: { id: x.id, i: p.i },
-              b: { id: p.p.id, i: p.p.i }
+              b: { id: p.p.id, i: p.p.i },
+              sections: p.sections
             })
           })
         }
       })
 
+      var pointIO = this.selectedPoints.input || this.selectedPoints.output
+      if (this.pointCursorEnd && pointIO) {
+        if (this.selectedPoints.output) {
+          connections.push({
+            a: { id: pointIO.id, i: pointIO.i },
+            b: {
+              x: this.pointCursorEnd.x,
+              y: this.pointCursorEnd.y
+            },
+            sections: this.pointCursorSections
+          })
+        }
+        if (this.selectedPoints.input) {
+          connections.push({
+            a: {
+              x: this.pointCursorEnd.x,
+              y: this.pointCursorEnd.y
+            },
+            b: { id: pointIO.id, i: pointIO.i },
+            sections: this.pointCursorSections
+          })
+        }
+      }
+
       return connections
     }
   },
   data: () => ({
+    readonly: false,
     nodes: [],
+    outputValues: {},
+    inputs: [],
+    outputs: [],
     nodeEls: [],
     nodeRendererEls: [],
     selectedPoints: {
       input: null,
       output: null
     },
+    pointCursorEnd: null,
+    pointCursorSections: null,
     selectedNode: null,
     moving: false,
     canvasMoving: false,
@@ -138,22 +195,22 @@ export default {
   methods: {
     generateInOutputNodes () {
       if (!this.nodes.find(x => x.type === 'inputs')) {
+        var rect = this.$el.getBoundingClientRect()
+
         this.nodes.push({
           type: 'inputs',
-          node: {
-            name: '',
-            inputs: [],
-            outputs: []
+          position: {
+            x: ((rect.width * 0.1) - this.canvas.x) * this.canvas.zoom,
+            y: ((rect.height / 2) - 10 - this.canvas.y) * this.canvas.zoom
           }
         })
       }
       if (!this.nodes.find(x => x.type === 'outputs')) {
         this.nodes.push({
           type: 'outputs',
-          node: {
-            name: '',
-            inputs: [],
-            outputs: []
+          position: {
+            x: ((rect.width * 0.9) - 70 - this.canvas.x) * this.canvas.zoom,
+            y: ((rect.height / 2) - 10 - this.canvas.y) * this.canvas.zoom
           }
         })
       }
@@ -164,15 +221,98 @@ export default {
       })
     },
     generateId () {
-      return Math.random().toString(32).replace('0.', '')
+      return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+      )
     },
-    inputPointClick (id, i) {
+    inputPointClick (id, i, e) {
       this.selectedPoints.input = { id, i }
+      this.pointDrag(e, false)
       this.tryConnectPoints()
     },
-    outputPointClick (id, i) {
+    outputPointClick (id, i, e) {
       this.selectedPoints.output = { id, i }
+      this.pointDrag(e, true)
       this.tryConnectPoints()
+    },
+    inputPointMouseup (id, i, e) {
+      if (this.pointCursorEnd) {
+        this.selectedPoints.input = { id, i }
+        this.tryConnectPoints()
+      }
+    },
+    outputPointMouseup (id, i, e) {
+      if (this.pointCursorEnd) {
+        this.selectedPoints.output = { id, i }
+        this.tryConnectPoints()
+      }
+    },
+    pointDrag (e, isOutput) {
+      const _this = this
+
+      document.addEventListener('mousemove', docMousemove)
+      document.addEventListener('mouseup', docMouseup)
+      if (isOutput) document.addEventListener('mousedown', docMousedown)
+      document.addEventListener('contextmenu', docContextmenu)
+
+      var startPos = {
+        x: e.clientX,
+        y: e.clientY
+      }
+
+      var rect
+      var dragging = false
+
+      function docMousemove (e2) {
+        var delta = {
+          x: e2.clientX - startPos.x,
+          y: e2.clientY - startPos.y
+        }
+
+        if (!dragging && Math.sqrt(delta.x ** 2 + delta.y ** 2) < 10) return
+
+        dragging = true
+
+        rect = _this.$el.getBoundingClientRect()
+
+        _this.pointCursorEnd = {
+          x: (e2.clientX - rect.x - _this.canvas.x) * _this.canvas.zoom,
+          y: (e2.clientY - rect.y - _this.canvas.y) * _this.canvas.zoom
+        }
+      }
+
+      function docMouseup (e3) {
+        if (e3.button === 2) return
+
+        document.removeEventListener('mousemove', docMousemove)
+        document.removeEventListener('mouseup', docMouseup)
+        if (isOutput) document.removeEventListener('mousedown', docMousedown)
+        document.removeEventListener('contextmenu', docContextmenu)
+        _this.pointCursorEnd = null
+        _this.pointCursorSections = null
+        if (dragging) _this.clearPointSelection()
+      }
+
+      function docMousedown (e4) {
+        if (e4.button === 2) {
+          e4.preventDefault()
+
+          var relX = (e4.clientX - rect.x - _this.canvas.x) * _this.canvas.zoom
+          var relY = (e4.clientY - rect.y - _this.canvas.y) * _this.canvas.zoom
+
+          if (!_this.pointCursorSections) {
+            _this.pointCursorSections = []
+          }
+
+          console.log(relX, relY)
+
+          console.log(e4)
+        }
+      }
+
+      function docContextmenu (e5) {
+        e5.preventDefault()
+      }
     },
     tryConnectPoints () {
       var inp = this.selectedPoints.input
@@ -192,7 +332,8 @@ export default {
               p: {
                 id: inp.id,
                 i: inp.i
-              }
+              },
+              sections: this.pointCursorSections || null
             }
 
             var index = node.outgoingPoints.findIndex(x =>
@@ -240,6 +381,8 @@ export default {
       })
     },
     addNode (node, position) {
+      if (this.readonly) return
+
       if (!position) {
         var rect = this.$el.getBoundingClientRect()
 
@@ -280,6 +423,8 @@ export default {
     removeNode (id) {
       var i = this.nodes.findIndex(x => x.id === id)
 
+      if (i < 0) return
+
       if (this.nodes[i].type === 'inputs' || this.nodes[i].type === 'outputs') return
 
       if (this.nodes[i].outgoingPoints) {
@@ -296,8 +441,15 @@ export default {
 
       this.recordHistory()
     },
-    copyToClipboard (id) {
-      var node = this.nodes.find(x => id === x.id)
+    removeSelectedNode () {
+      if (!this.selectedNode) return
+
+      this.removeNode(this.selectedNode)
+    },
+    copyToClipboard () {
+      if (!this.selectedNode) return
+
+      var node = this.nodes.find(x => this.selectedNode === x.id)
 
       this.clipboard = {
         node: node.node,
@@ -308,7 +460,15 @@ export default {
       }
     },
     pasteFromClipboard () {
-      this.addNode(this.clipboard.node, this.clipboard.position)
+      if (this.clipboard) {
+        this.addNode(this.clipboard.node, this.clipboard.position)
+      }
+    },
+    cutNode () {
+      if (!this.selectedNode) return
+
+      this.copyToClipboard()
+      this.removeSelectedNode()
     },
     recordHistory () {
       this.history.splice(0, this.historyIndex)
@@ -320,12 +480,15 @@ export default {
       this.historyIndex = 0
     },
     undo () {
+      if (this.readonly) return
       if (this.historyIndex < this.history.length - 1) this.historyIndex++
     },
     redo () {
+      if (this.readonly) return
       if (this.historyIndex > 0) this.historyIndex--
     },
     nodeTouchstartMousedown (e, node) {
+      if (this.readonly) return
       if (this.moving) return
 
       const _this = this
@@ -383,12 +546,12 @@ export default {
         }
 
         var delta = {
-          x: (client.x - clientStart.x) * _this.canvas.zoom,
-          y: (client.y - clientStart.y) * _this.canvas.zoom
+          x: client.x - clientStart.x,
+          y: client.y - clientStart.y
         }
         var distance = Math.sqrt(delta.x ** 2 + delta.y ** 2)
 
-        if (distance < 10 && !_this.moving) return
+        if (distance < Math.min(10, 10 / _this.canvas.zoom) && !_this.moving) return
         _this.moving = true
 
         node.position = {
@@ -478,6 +641,8 @@ export default {
       document.addEventListener('mousemove', docMousemove)
       document.addEventListener('mouseup', docMouseup)
 
+      document.activeElement.blur()
+
       function docMousemove (e2) {
         var delta = {
           x: e2.clientX - clientStart.x,
@@ -504,6 +669,7 @@ export default {
     },
     backgroundMousewheel (e) {
       if (!this.nodes.length) return
+      if (this.pointCursorEnd) return
       if (this.moving) return
 
       // var dir = e.deltaY === 0 ? 0 : (e.deltaY > 0 ? 1 : -1)
@@ -520,75 +686,57 @@ export default {
         this.canvas.zoom = target
       }
     },
-    docKeydown (e) {
-      const _this = this
-
-      var keybinds = [
-        // COPY: CTRL C
-        {
-          bind: () => e.key === 'c' && e.ctrlKey,
-          function () {
-            if (_this.selectedNode) {
-              _this.copyToClipboard(_this.selectedNode)
-            }
-          }
-        },
-        // PASTE: CTRL V
-        {
-          bind: () => e.key === 'v' && e.ctrlKey,
-          function: () => _this.pasteFromClipboard()
-        },
-        // CUT: CTRL X
-        {
-          bind: () => e.key === 'x' && e.ctrlKey,
-          function () {
-            if (_this.selectedNode) {
-              _this.copyToClipboard(_this.selectedNode)
-
-              _this.removeNode(_this.selectedNode)
-            }
-          }
-        },
-        // DELETE: DEL
-        {
-          bind: () => e.key === 'Delete',
-          function () {
-            if (_this.selectedNode) {
-              _this.removeNode(_this.selectedNode)
-            }
-          }
-        }
-        // UNDO: CTRL Z
-        // {
-        //   bind: () => e.key === 'z' && e.ctrlKey,
-        //   function: () => _this.undo()
-        // },
-        // // REDO: CTRL SHIFT Z
-        // {
-        //   bind: () => e.key === 'Z' && e.ctrlKey && e.shiftKey,
-        //   function: () => _this.redo()
-        // }
-      ]
-
-      if (e.srcElement.nodeName === 'INPUT') return
-      console.log('[KEYPRESS]', e)
-
-      var keybind = keybinds.find(x => x.bind())
-      if (keybind) keybind.function()
-    },
     clearPointSelection () {
       this.selectedPoints.input = null
       this.selectedPoints.output = null
     },
     toggleInput (id, i) {
+      if (this.readonly) return
       var inputValues = this.nodeEls.find(x => x.id === id).inputValues
       inputValues[i] = !inputValues[i]
     },
     outputTextChanged (id, text, i) {
-      this.nodes.find(x => x.id === id).node.outputs[i] = text
+      if (this.readonly) return
+      this.inputs[i] = text
     },
     inputTextChanged (id, text, i) {
-      this.nodes.find(x => x.id === id).node.inputs[i] = text
+      if (this.readonly) return
+      this.outputs[i] = text
+    },
+    clear () {
+      this.nodes = []
+      this.outputValues = {}
+      this.inputs = []
+      this.outputs = []
+      this.readonly = false
+    },
+    computedNodeObject () {
+      // return {
+      //   nodes: this.nodes.map(x => ({
+      //     id: x.id,
+      //     type: x.type,
+      //     position: Object.assign({}, x.position),
+      //     outgoingPoints: Array.from(x.outgoingPoints || [])
+      //       .map(y => ({
+      //         i: y.i,
+      //         p: Object.assign({}, y.p)
+      //       }))
+      //   })),
+      //   outputs: Array.from(this.outputs),
+      //   inputs: Array.from(this.inputs)
+      // }
+      return JSON.parse(JSON.stringify({
+        readonly: this.readonly,
+        nodes: this.nodes,
+        outputs: this.outputs,
+        inputs: this.inputs
+      }))
+    },
+    setFromComputedNodeObject (obj) {
+      this.readonly = obj.readonly !== undefined ? obj.readonly : false
+      this.nodes = obj.nodes || []
+      this.outputs = obj.outputs || []
+      this.inputs = obj.inputs || []
     }
   },
   beforeUpdate (e) {
@@ -598,15 +746,13 @@ export default {
   mounted () {
     this.recordHistory()
     this.generateInOutputNodes()
-    document.addEventListener('keydown', this.docKeydown)
-  },
-  unmounted () {
-    document.removeEventListener('keydown', this.docKeydown)
   }
 }
 </script>
 
 <style lang="scss" scoped>
+@use '../assets/scss' as r;
+
 .node-graph {
   user-select: none;
 
@@ -614,11 +760,31 @@ export default {
     height: 100%;
   }
 
+  &__inspecting-node {
+    pointer-events: none;
+    position: absolute;
+    inset: auto auto 6vh 4vh;
+
+    color: #242429;
+    font-family: r.$header-font;
+    font-weight: 700;
+    font-size: 20vh;
+    line-height: .8;
+
+    small {
+      font-size: .2em;
+    }
+
+    &__readonly {
+      font-size: .4em;
+    }
+  }
+
   &__canvas {
     position: absolute;
     top: 0;
     pointer-events: none;
-    transition: transform .2s;
+    // transition: transform .2s;
 
     &--moving {
       transition: none;
@@ -630,6 +796,24 @@ export default {
     position: absolute;
     cursor: move;
     pointer-events: all;
+  }
+
+  &--readonly {
+    .node-graph__background {
+      background: repeating-linear-gradient(-45deg, transparent, transparent 6px, #ffffff08 6px, #ffffff08 10px);
+    }
+
+    :deep(.node) {
+      cursor: not-allowed;
+
+      * {
+        pointer-events: none !important;
+      }
+
+      &.node--deep {
+        cursor: pointer;
+      }
+    }
   }
 }
 </style>

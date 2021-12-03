@@ -1,26 +1,27 @@
 <template>
-  <div tabindex="0" :class="['node', 'node--' + type]">
+  <div tabindex="0" :class="['node', type ? 'node--' + type : '', (typeof (node) === 'object' ? true : nodeLibary.complex[node]) ? 'node--deep' : '']">
     <div class="node__points node__points--inputs">
       <!-- INPUT POINTS -->
       <div v-if="type === 'outputs'" class="node__point">
         <button
           class="node__point-btn node__point-btn--add-point"
-          @click="$emit('addOutput')"
+          @click="() => { if (!readonly) $emit('addOutput') }"
         >
           <i class="bi-plus"/>
         </button>
         <button
           v-if="type === 'outputs'"
           class="node__point-btn node__point-btn--transparent"
-          @click="$emit('menuOpen')"
+          @click="() => { if (!readonly) $emit('menuOpen') }"
         >
           <i class="bi-three-dots-vertical"/>
         </button>
       </div>
       <div class="node__point" v-for="(p, i) in inputs" :key="i">
         <button
-          @mousedown.prevent="$emit('inputPointClick', id, i)"
-          @touchstart.prevent="$emit('inputPointClick', id, i)"
+          @mousedown.left.prevent="(e) => { if (!readonly) $emit('inputPointClick', id, i, e)}"
+          @touchstart.prevent="(e) => { if (!readonly) $emit('inputPointClick', id, i, e) }"
+          @mouseup="(e) => { if (!readonly) $emit('inputPointMouseup', id, i, e) }"
           :class="['node__point-btn',
             inputValues[i] ? 'node__point-btn--active' : '',
             (selectedPoints.input || {}).id === id && (selectedPoints.input || {}).i === i ? 'node__point-btn--selected' : '']"
@@ -34,15 +35,16 @@
               v-show="iEditing === i"
               :ref="(el) => { if (el) inputTextEls.push(el) }"
               v-model="iText"
-              @blur="iEndEdit (i)"
-              @keydown.enter="iEndEdit (i)"
-              @keydown.esc="iEndEdit (i)"
+              @blur="() => { if (!readonly) iEndEdit (i) }"
+              @keydown.enter="() => { if (!readonly) iEndEdit (i) }"
+              @keydown.esc="() => { if (!readonly) iEndEdit (i) }"
               type="text"
               class="node__point-name-input"
+              placeholder="Benenne Output"
             >
             <button
               class="node__point-edit-btn"
-              @mousedown="iEdit(i)"
+              @mousedown="() => { if (!readonly) iEdit(i) }"
               v-if="iEditing !== i">
                 {{ inputs[i] }}
               </button>
@@ -56,22 +58,23 @@
       <div v-if="type === 'inputs'" class="node__point">
         <button
           class="node__point-btn node__point-btn--add-point"
-          @click="$emit('addInput')"
+          @click="() => { if (!readonly) $emit('addInput') }"
         >
           <i class="bi-plus"/>
         </button>
         <button
           v-if="type === 'inputs'"
           class="node__point-btn node__point-btn--transparent"
-          @click="$emit('menuOpen')"
+          @click="() => { if (!readonly) $emit('menuOpen') }"
         >
           <i class="bi-three-dots-vertical"/>
         </button>
       </div>
       <div class="node__point" v-for="(p, i) in outputs" :key="i">
         <button
-          @mousedown.prevent="$emit('outputPointClick', id, i)"
-          @touchstart.prevent="$emit('outputPointClick', id, i)"
+          @mousedown.left.prevent="(e) => { if (!readonly) $emit('outputPointClick', id, i, e) }"
+          @touchstart.prevent="(e) => { if (!readonly) $emit('outputPointClick', id, i, e) }"
+          @mouseup="(e) => { if (!readonly) $emit('outputPointMouseup', id, i, e) }"
           :class="['node__point-btn',
             outputValues[i] ? 'node__point-btn--active' : '',
             (selectedPoints.output || {}).id === id && (selectedPoints.output || {}).i === i ? 'node__point-btn--selected' : '']"
@@ -85,15 +88,16 @@
               v-show="oEditing === i"
               :ref="(el) => { if (el) inputTextEls.push(el) }"
               v-model="oText"
-              @blur="oEndEdit (i)"
-              @keydown.enter="oEndEdit (i)"
-              @keydown.esc="oEndEdit (i)"
+              @blur="() => { if (!readonly) oEndEdit (i) }"
+              @keydown.enter="() => { if (!readonly) oEndEdit (i) }"
+              @keydown.esc="() => { if (!readonly) oEndEdit (i) }"
               type="text"
               class="node__point-name-input"
+              placeholder="Benenne Input"
             >
             <button
               class="node__point-edit-btn"
-              @mousedown="oEdit(i)"
+              @mousedown="() => { if (!readonly) oEdit(i) }"
               v-if="oEditing !== i">
                 {{ outputs[i] }}
               </button>
@@ -101,7 +105,7 @@
 
           <button
             class="node__point-btn node__point-btn--small node__point-btn--toggle"
-            @click="$emit('toggleInput', id, i)"
+            @click="() => { if (!readonly) $emit('toggleInput', id, i) }"
           />
         </div>
       </div>
@@ -110,10 +114,13 @@
 </template>
 
 <script>
+import { mapState } from 'vuex'
 export default {
   emits: [
     'inputPointClick',
     'outputPointClick',
+    'inputPointMouseup',
+    'outputPointMouseup',
     'addInput',
     'addOutput',
     'toggleInput',
@@ -124,12 +131,43 @@ export default {
   props: {
     id: String,
     type: String,
-    name: String,
-    inputs: { type: Array, default: () => [''] },
-    outputs: { type: Array, default: () => [''] },
+    name_: String,
+    node: [Object, String],
+    inputs_: Array,
+    outputs_: Array,
     inputValues: Array,
     outputValues: Array,
+    readonly: Boolean,
     selectedPoints: { type: Object, default: () => ({ input: null, output: null }) }
+  },
+  computed: {
+    ...mapState([
+      'nodeLibary'
+    ]),
+    combinedLibary () {
+      return { ...this.nodeLibary.primitive, ...this.nodeLibary.complex, ...this.nodeLibary.custom }
+    },
+    name () {
+      try {
+        if (typeof (this.node) === 'object') {
+          return this.node.name
+        } return this.name_ || this.combinedLibary[this.node].name || ''
+      } catch { return null }
+    },
+    inputs () {
+      try {
+        if (typeof (this.node) === 'object') {
+          return this.node.inputs
+        } return this.inputs_ || this.combinedLibary[this.node].inputs || ['']
+      } catch { return [] }
+    },
+    outputs () {
+      try {
+        if (typeof (this.node) === 'object') {
+          return this.node.outputs
+        } return this.outputs_ || this.combinedLibary[this.node].outputs || ['']
+      } catch { return [] }
+    }
   },
   data: () => ({
     inputEls: [],
