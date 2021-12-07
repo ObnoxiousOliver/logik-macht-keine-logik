@@ -161,7 +161,7 @@ export default {
       else func()
     },
     nodeInputChanged (x, id) {
-      console.log(x, this.nodes_.find(y => y.id === id))
+      // console.log(x, this.nodes_.find(y => y.id === id))
       if (this.nodes_.find(y => y.id === id).type === 'outputs') {
         this.nodeOutputValues = x
       }

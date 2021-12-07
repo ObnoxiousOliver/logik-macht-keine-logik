@@ -1,25 +1,27 @@
 <template>
-  <div tabindex="0" :class="['node', type ? 'node--' + type : '', (typeof (node) === 'object' ? true : nodeLibary.complex[node]) ? 'node--deep' : '']">
+  <div :class="['node', type ? 'node--' + type : '', (typeof (node) === 'object' ? true : nodeLibary.complex[node]) ? 'node--deep' : '']">
     <div class="node__points node__points--inputs">
       <!-- INPUT POINTS -->
       <div v-if="type === 'outputs'" class="node__point">
         <button
+          tabindex="-1"
           class="node__point-btn node__point-btn--add-point"
           @click="() => { if (!readonly) $emit('addOutput') }"
         >
           <i class="bi-plus"/>
         </button>
-        <button
+        <!-- <button
           v-if="type === 'outputs'"
           class="node__point-btn node__point-btn--transparent"
           @click="() => { if (!readonly) $emit('menuOpen') }"
         >
           <i class="bi-three-dots-vertical"/>
-        </button>
+        </button> -->
       </div>
       <div class="node__point" v-for="(p, i) in inputs" :key="i">
         <button
-          @mousedown.left.prevent="(e) => { if (!readonly) $emit('inputPointClick', id, i, e)}"
+          tabindex="-1"
+          @mousedown.left.prevent="(e) => { if (!readonly) $emit('inputPointClick', id, i, e) }"
           @touchstart.prevent="(e) => { if (!readonly) $emit('inputPointClick', id, i, e) }"
           @mouseup="(e) => { if (!readonly) $emit('inputPointMouseup', id, i, e) }"
           :class="['node__point-btn',
@@ -43,11 +45,13 @@
               placeholder="Benenne Output"
             >
             <button
+              tabindex="-1"
               class="node__point-edit-btn"
               @mousedown="() => { if (!readonly) iEdit(i) }"
-              v-if="iEditing !== i">
-                {{ inputs[i] }}
-              </button>
+              v-if="iEditing !== i"
+            >
+              {{ inputs[i] }}
+            </button>
           </div>
         </div>
       </div>
@@ -57,21 +61,23 @@
       <!-- OUTPUT POINTS -->
       <div v-if="type === 'inputs'" class="node__point">
         <button
+          tabindex="-1"
           class="node__point-btn node__point-btn--add-point"
           @click="() => { if (!readonly) $emit('addInput') }"
         >
           <i class="bi-plus"/>
         </button>
-        <button
+        <!-- <button
           v-if="type === 'inputs'"
           class="node__point-btn node__point-btn--transparent"
           @click="() => { if (!readonly) $emit('menuOpen') }"
         >
           <i class="bi-three-dots-vertical"/>
-        </button>
+        </button> -->
       </div>
       <div class="node__point" v-for="(p, i) in outputs" :key="i">
         <button
+          tabindex="-1"
           @mousedown.left.prevent="(e) => { if (!readonly) $emit('outputPointClick', id, i, e) }"
           @touchstart.prevent="(e) => { if (!readonly) $emit('outputPointClick', id, i, e) }"
           @mouseup="(e) => { if (!readonly) $emit('outputPointMouseup', id, i, e) }"
@@ -96,16 +102,19 @@
               placeholder="Benenne Input"
             >
             <button
+              tabindex="-1"
               class="node__point-edit-btn"
               @mousedown="() => { if (!readonly) oEdit(i) }"
-              v-if="oEditing !== i">
-                {{ outputs[i] }}
-              </button>
+              v-if="oEditing !== i"
+            >
+              {{ outputs[i] }}
+            </button>
           </div>
 
           <button
+            tabindex="-1"
             class="node__point-btn node__point-btn--small node__point-btn--toggle"
-            @click="() => { if (!readonly) $emit('toggleInput', id, i) }"
+            @click="$emit('toggleInput', id, i)"
           />
         </div>
       </div>
@@ -135,8 +144,8 @@ export default {
     node: [Object, String],
     inputs_: Array,
     outputs_: Array,
-    inputValues: Array,
-    outputValues: Array,
+    inputValues: { type: Array, default: () => [] },
+    outputValues: { type: Array, default: () => [] },
     readonly: Boolean,
     selectedPoints: { type: Object, default: () => ({ input: null, output: null }) }
   },
@@ -230,14 +239,14 @@ export default {
 @use '../assets/scss' as r;
 
 .node {
-  background: #25272b;
+  background: #26282c;
   width: fit-content;
   border-radius: .5rem;
   display: flex;
   align-items: center;
   user-select: none;
-  box-shadow: #0005 0 0 .5rem;
   transition: box-shadow .1s;
+  box-shadow: #0005 0 0 .5rem;
   text-align: center;
 
   &__name {
@@ -259,13 +268,17 @@ export default {
 
     &--inputs {
       transform: translateX(-.6rem);
+
+      .node--outputs & {
+        min-width: 3.5rem;
+      }
     }
     &--outputs {
       transform: translateX(.6rem);
 
-      // .node--inputs & {
-      //   min-width: 2.4rem;
-      // }
+      .node--inputs & {
+        min-width: 3.5rem;
+      }
     }
   }
 
@@ -284,7 +297,7 @@ export default {
     position: relative;
     background: #555961;
     color: #ccc;
-    font-size: .9rem;
+    font-size: 1rem;
     height: 1.2rem;
     width: 1.2rem;
     border-radius: 50%;
@@ -308,7 +321,7 @@ export default {
     &--add-point {
       background: #25272b;
       border: currentColor solid .1rem;
-      line-height: 0;
+      line-height: 1;
     }
 
     &--small {

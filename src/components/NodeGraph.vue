@@ -4,10 +4,12 @@
       class="node-graph__background"
       @mousedown.left.prevent="backgroundMousedown"
     >
-      <span v-if="inspectingNode" class="node-graph__inspecting-node">
-        <small>Inspecting:</small><br>
-        {{ inspectingNode }}<span class="node-graph__inspecting-node__readonly" v-if="readonly">(readonly)</span>
-      </span>
+      <div v-if="inspectingNode" class="node-graph__inspecting-node">
+        <small v-if="readonly">(Schreibgeschützt)</small>
+        <small v-else>(Bearbeitbar)</small>
+        <br>
+        {{ inspectingNode }}
+      </div>
     </div>
     <div
       :class="['node-graph__canvas', canvasMoving ? 'node-graph__canvas--moving' : '']"
@@ -48,7 +50,7 @@
           @outputPointMouseup="(id, i, e) => { if (!readonly) outputPointMouseup(id, i, e) }"
           @addInput="() => { if (!readonly) inputs.push(''); clearPointSelection() }"
           @addOutput="() => { if (!readonly) outputs.push(''); clearPointSelection() }"
-          @toggleInput="(id, i) => { if (!readonly) toggleInput(id, i) }"
+          @toggleInput="(id, i) => { toggleInput(id, i) }"
           @outputTextChanged="(id, text, e) => { if (!readonly) outputTextChanged(id, text, e) }"
           @inputTextChanged="(id, text, e) => { if (!readonly) inputTextChanged(id, text, e) }"
           @dblclick="$emit('inspectNode', node.id)"
@@ -91,7 +93,8 @@ import { mapState } from 'vuex'
 
 export default {
   emits: [
-    'inspectNode'
+    'inspectNode',
+    'update:zoom'
   ],
   props: {
     inspectingNode: String
@@ -145,6 +148,9 @@ export default {
       }
 
       return connections
+    },
+    zoom_ () {
+      return 1 / this.canvas.zoom
     }
   },
   data: () => ({
@@ -190,6 +196,9 @@ export default {
     },
     historyIndex (val) {
       this.nodes = this.history[val]
+    },
+    zoom_ (val) {
+      this.$emit('update:zoom', val)
     }
   },
   methods: {
@@ -387,8 +396,8 @@ export default {
         var rect = this.$el.getBoundingClientRect()
 
         position = {
-          x: ((rect.width / 2) - 100 - this.canvas.x) * this.canvas.zoom,
-          y: ((rect.height / 2) - 100 - this.canvas.y) * this.canvas.zoom
+          x: ((rect.width / 2) - 50 / this.canvas.zoom - this.canvas.x) * this.canvas.zoom,
+          y: ((rect.height / 2) - 30 / this.canvas.zoom - this.canvas.y) * this.canvas.zoom
         }
       }
 
@@ -516,7 +525,7 @@ export default {
           y: e.changedTouches[0].clientY
         }
 
-        console.log(touchId)
+        // console.log(touchId)
 
         document.addEventListener('touchmove', docMove)
         document.addEventListener('touchend', docTouchend)
@@ -555,8 +564,8 @@ export default {
         _this.moving = true
 
         node.position = {
-          x: offset.x + client.x * _this.canvas.zoom,
-          y: offset.y + client.y * _this.canvas.zoom
+          x: Math.round(offset.x + client.x * _this.canvas.zoom),
+          y: Math.round(offset.y + client.y * _this.canvas.zoom)
         }
       }
       function docMouseup (e3) {
@@ -611,8 +620,8 @@ export default {
         move = true
 
         node.position = {
-          x: offset.x + touch.clientX,
-          y: offset.y + touch.clientY
+          x: Math.round(offset.x + touch.clientX),
+          y: Math.round(offset.y + touch.clientY)
         }
       }
       function docTouchend (e3) {
@@ -676,22 +685,35 @@ export default {
 
       var target = this.canvas.zoom + e.deltaY / 1000
 
-      if (target > 0.5 && target < 10) {
-        var zoomDelta = target / this.canvas.zoom
-        console.log(zoomDelta)
+      target = Math.max(0.2, Math.min(5, target))
 
-        this.canvas.x = (this.canvas.x - e.clientX) / zoomDelta + e.clientX
-        this.canvas.y = (this.canvas.y - e.clientY) / zoomDelta + e.clientY
+      // if (target > 0.5 && target < 10) {
+      var zoomDelta = target / this.canvas.zoom
+      // console.log(zoomDelta)
 
-        this.canvas.zoom = target
-      }
+      this.canvas.x = (this.canvas.x - e.clientX) / zoomDelta + e.clientX
+      this.canvas.y = (this.canvas.y - e.clientY) / zoomDelta + e.clientY
+
+      this.canvas.zoom = target
+      // }
+    },
+    changeZoom (val) {
+      if (val === this.zoom) return
+
+      var zoomDelta = 1 / val / this.canvas.zoom
+      var rect = this.$el.getBoundingClientRect()
+
+      // console.log(rect, zoomDelta)
+
+      this.canvas.zoom = 1 / val
+      this.canvas.x = (this.canvas.x - rect.width / 2) / zoomDelta + rect.width / 2
+      this.canvas.y = (this.canvas.y - rect.height / 2) / zoomDelta + rect.height / 2
     },
     clearPointSelection () {
       this.selectedPoints.input = null
       this.selectedPoints.output = null
     },
     toggleInput (id, i) {
-      if (this.readonly) return
       var inputValues = this.nodeEls.find(x => x.id === id).inputValues
       inputValues[i] = !inputValues[i]
     },
@@ -745,7 +767,7 @@ export default {
   },
   mounted () {
     this.recordHistory()
-    this.generateInOutputNodes()
+    setTimeout(() => this.generateInOutputNodes())
   }
 }
 </script>
@@ -763,7 +785,8 @@ export default {
   &__inspecting-node {
     pointer-events: none;
     position: absolute;
-    inset: auto auto 6vh 4vh;
+    inset: auto 20rem 6vh 4vh;
+    text-transform: uppercase;
 
     color: #242429;
     font-family: r.$header-font;
@@ -773,10 +796,6 @@ export default {
 
     small {
       font-size: .2em;
-    }
-
-    &__readonly {
-      font-size: .4em;
     }
   }
 
@@ -806,8 +825,11 @@ export default {
     :deep(.node) {
       cursor: not-allowed;
 
-      * {
+      *:not(.node__point-btn--toggle) {
         pointer-events: none !important;
+      }
+      .node__point-btn--toggle {
+        pointer-events: all;
       }
 
       &.node--deep {
